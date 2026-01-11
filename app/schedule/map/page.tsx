@@ -14,12 +14,6 @@ type GoogleMapsLoaded = {
   };
 };
 
-declare global {
-  interface Window {
-    google?: GoogleMapsLoaded;
-  }
-}
-
 export default function MapPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -125,7 +119,7 @@ export default function MapPage() {
     if (typeof window === 'undefined') return;
 
     const checkLoaded = () => {
-      if (window.google?.maps) {
+      if ((window as any).google?.maps) {
         return true;
       }
       return false;
@@ -171,7 +165,7 @@ export default function MapPage() {
       return;
     }
 
-    const google = window.google;
+    const google = (window as any).google as GoogleMapsLoaded | undefined;
     if (!google?.maps) return;
 
     const Maps = google.maps;
