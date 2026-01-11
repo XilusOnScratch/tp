@@ -21,8 +21,8 @@ export const GET = async (req: Request) => {
       if (!user) {
         user = await User.create({
           email: session.user.email,
-          name: session.user.name,
-          image: session.user.image,
+          name: session.user.name || undefined,
+          image: session.user.image || undefined,
         });
       }
       userId = user._id.toString();
@@ -69,8 +69,8 @@ export const POST = async (req: Request) => {
       if (!user) {
         user = await User.create({
           email: session.user.email,
-          name: session.user.name,
-          image: session.user.image,
+          name: session.user.name || undefined,
+          image: session.user.image || undefined,
         });
       }
       userId = user._id.toString();
