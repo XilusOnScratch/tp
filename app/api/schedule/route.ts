@@ -22,19 +22,12 @@ export const GET = async (req: Request) => {
 
     await connectDB();
 
-    // Convert tripId to ObjectId if it's a string
-    let tripObjectId;
-    try {
-      tripObjectId = mongoose.Types.ObjectId.isValid(tripId) 
-        ? new mongoose.Types.ObjectId(tripId)
-        : tripId;
-    } catch (error) {
-      console.error('Invalid tripId format in GET:', tripId, error);
+    if (!mongoose.Types.ObjectId.isValid(tripId)) {
       return NextResponse.json({ error: 'Invalid trip ID format' }, { status: 400 });
     }
 
     const trip = await Trip.findOne({
-      _id: tripObjectId,
+      _id: tripId,
       $or: [
         { userId: session.user.id },
         { participantIds: session.user.id }
@@ -43,7 +36,7 @@ export const GET = async (req: Request) => {
 
     if (!trip) {
       console.error('Trip not found in GET /api/schedule:', {
-        tripId: tripObjectId,
+        tripId,
         userId: session.user.id
       });
       return NextResponse.json({ error: 'Trip not found or access denied' }, { status: 404 });
@@ -79,20 +72,13 @@ export const POST = async (req: Request) => {
 
     await connectDB();
 
-    // Convert tripId to ObjectId if it's a string
-    let tripObjectId;
-    try {
-      tripObjectId = mongoose.Types.ObjectId.isValid(tripId) 
-        ? new mongoose.Types.ObjectId(tripId)
-        : tripId;
-    } catch (error) {
-      console.error('Invalid tripId format in POST:', tripId, error);
+    if (!mongoose.Types.ObjectId.isValid(tripId)) {
       return NextResponse.json({ error: 'Invalid trip ID format' }, { status: 400 });
     }
 
     const trip = await Trip.findOneAndUpdate(
       {
-        _id: tripObjectId,
+        _id: tripId,
         $or: [
           { userId: session.user.id },
           { participantIds: session.user.id }
@@ -104,7 +90,7 @@ export const POST = async (req: Request) => {
 
     if (!trip) {
       console.error('Failed to save itinerary - trip not found or access denied:', {
-        tripId: tripObjectId,
+        tripId,
         userId: session.user.id
       });
       return NextResponse.json({ error: 'Trip not found or access denied' }, { status: 404 });

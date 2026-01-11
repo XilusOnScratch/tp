@@ -53,20 +53,13 @@ export const POST = async (req: Request) => {
 
     await connectDB();
 
-    // Convert tripId to ObjectId if it's a string
-    let tripObjectId;
-    try {
-      tripObjectId = mongoose.Types.ObjectId.isValid(tripId) 
-        ? new mongoose.Types.ObjectId(tripId)
-        : tripId;
-    } catch (error) {
-      console.error('Invalid tripId format:', tripId, error);
+    if (!mongoose.Types.ObjectId.isValid(tripId)) {
       return NextResponse.json({ error: 'Invalid trip ID format' }, { status: 400 });
     }
 
     // Get trip - check if user is participant
     const trip = await Trip.findOne({
-      _id: tripObjectId,
+      _id: tripId,
       $or: [
         { userId: session.user.id },
         { participantIds: session.user.id }
@@ -74,7 +67,7 @@ export const POST = async (req: Request) => {
     });
     if (!trip) {
       console.error('Trip not found or access denied:', {
-        tripId: tripObjectId,
+        tripId,
         userId: session.user.id
       });
       return NextResponse.json({ error: 'Trip not found or access denied' }, { status: 404 });
@@ -183,7 +176,7 @@ export const POST = async (req: Request) => {
     scheduleData = validateScheduleItems(scheduleData, items.length);
 
     console.log('Saving schedule:', {
-      tripId: tripObjectId,
+      tripId,
       scheduleItemsCount: scheduleData.length,
       firstItem: scheduleData[0]
     });
@@ -191,7 +184,7 @@ export const POST = async (req: Request) => {
     // Save schedule to trip and update status
     const updateResult = await Trip.findOneAndUpdate(
       {
-        _id: tripObjectId,
+        _id: tripId,
         $or: [
           { userId: session.user.id },
           { participantIds: session.user.id }
@@ -203,17 +196,17 @@ export const POST = async (req: Request) => {
 
     if (!updateResult) {
       console.error('Failed to save schedule - trip not found or access denied:', {
-        tripId: tripObjectId,
+        tripId,
         userId: session.user.id
       });
       return NextResponse.json({ error: 'Failed to save schedule' }, { status: 500 });
     }
 
     // Verify the save by re-querying the database
-    const verifiedTrip = await Trip.findById(tripObjectId);
+    const verifiedTrip = await Trip.findById(tripId);
     
     if (!verifiedTrip) {
-      console.error('CRITICAL: Trip not found after save operation:', tripObjectId);
+      console.error('CRITICAL: Trip not found after save operation:', tripId);
       return NextResponse.json({ error: 'Failed to verify schedule save' }, { status: 500 });
     }
 
