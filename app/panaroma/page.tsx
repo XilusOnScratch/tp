@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
 type LatLng = { lat: number; lng: number };
@@ -538,5 +538,17 @@ export default function GoogleStreetViewPage() {
       </div>
       <div ref={containerRef} className="w-full h-full absolute inset-0 z-0" />
     </div>
+  );
+}
+
+export default function GoogleStreetViewPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-white">Loading...</div>
+      </div>
+    }>
+      <GoogleStreetViewPageContent />
+    </Suspense>
   );
 }

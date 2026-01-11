@@ -9,6 +9,12 @@ Speed changes applied (keeps your logic):
 - MediaPipe model_complexity lowered to 0 (faster)
 - Lock scope is kept small (only around shared-state writes/reads)
 - Camera loop no longer sleeps a fixed 33ms (uses tiny sleep to avoid pegging CPU)
+
+Swipe reliability + NO overswipe:
+- Swipe is latched as an event until consumed (so frontend polling lag won't miss it)
+- Backend enforces a hard emit interval (default 1.0s) between swipe EVENTS
+- Backend requires "re-arm" (a few consecutive neutral frames or hand disappears) before allowing a new swipe
+  -> prevents 1 physical swipe motion from triggering 2-3 swipes
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -113,6 +119,10 @@ class HandTracker:
         queue_len: int = 10,
         infer_fps: float = 15.0,
         target_width: int = 640,
+        # swipe overswipe controls
+        min_event_interval_s: float = 1.0,         # hard limit between emitted swipe EVENTS
+        rearm_no_swipe_frames: int = 6,            # consecutive neutral frames required to allow another swipe
+        pending_ttl_s: float = 1.25,               # how long we keep an un-acked swipe available
     ):
         # Camera setup
         self.cap = cv2.VideoCapture(cam_index)
@@ -134,12 +144,12 @@ class HandTracker:
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=1,
-            model_complexity=0,               # speed change
-            min_detection_confidence=0.60,    # speed change (less strict)
-            min_tracking_confidence=0.60,     # speed change (less strict)
+            model_complexity=0,
+            min_detection_confidence=0.60,
+            min_tracking_confidence=0.60,
         )
 
-        # Swipe detection state
+        # Swipe detection state (your existing logic)
         self.swipe_queue = deque(maxlen=queue_len)
         self._last_swipe_time = 0.0
         self._swipe_cooldown_s = 1.5
@@ -152,13 +162,26 @@ class HandTracker:
         # Current swipe state
         self.current_swipe = 0
         self.current_direction = "none"
-        
+
+        # -------------------------
+        # Latched swipe event (so frontend polling can’t miss it)
+        # -------------------------
         self._event_id = 0
         self._pending_swipe: int = 0          # 0|1|2
         self._pending_direction: str = "none"
         self._pending_event_id: int = 0
         self._pending_set_time: float = 0.0
-        self._pending_ttl_s: float = 1.25     # how long we keep an un-acked swipe available
+        self._pending_ttl_s: float = float(max(0.2, pending_ttl_s))
+
+        # -------------------------
+        # Overswipe prevention (backend rate limit + re-arm)
+        # -------------------------
+        self._min_event_interval_s = float(max(0.0, min_event_interval_s))
+        self._last_event_emit_time = 0.0
+
+        self._armed = True
+        self._no_swipe_frames = 0
+        self._rearm_after_no_swipe_frames = int(max(1, rearm_no_swipe_frames))
 
         # Thread control
         self.running = False
@@ -193,9 +216,7 @@ class HandTracker:
         scale = self._target_width / float(w)
         new_w = self._target_width
         new_h = int(round(h * scale))
-        small = cv2.resize(
-            frame_bgr, (new_w, new_h), interpolation=self._downscale_interpolation
-        )
+        small = cv2.resize(frame_bgr, (new_w, new_h), interpolation=self._downscale_interpolation)
         return small, scale
 
     def detect_swipe(
@@ -242,13 +263,13 @@ class HandTracker:
 
         frame = cv2.flip(frame, 1)
 
-        # Speed change: run MediaPipe only at fixed infer FPS
+        # Speed: run MediaPipe only at fixed infer FPS
         now = time.time()
         if (now - self._last_infer_t) < self._infer_period:
             return
         self._last_infer_t = now
 
-        # Speed change: downscale before inference
+        # Speed: downscale before inference
         small_bgr, _scale = self._downscale_for_inference(frame)
         sh, sw = small_bgr.shape[:2]
 
@@ -281,14 +302,19 @@ class HandTracker:
 
             swipe = self.detect_swipe()
 
-            # Cooldown + debouncing (tiny lock)
             now2 = time.time()
             with self.lock:
+                # ---------------------------------------------------------
+                # A) Your existing cooldown gate
+                # ---------------------------------------------------------
                 if swipe != 0 and (now2 - self._last_swipe_time) >= self._swipe_cooldown_s:
                     self._last_swipe_time = now2
                 else:
                     swipe = 0
 
+                # ---------------------------------------------------------
+                # B) Your existing "no repeated nonzero in last frames" gate
+                # ---------------------------------------------------------
                 if swipe != 0 and any(s != 0 for s in self.last_n_frames):
                     swipe = 0
                 self.last_n_frames.append(swipe)
@@ -296,15 +322,37 @@ class HandTracker:
                 self.current_swipe = swipe
                 self.current_direction = "right" if swipe == 1 else "left" if swipe == 2 else "none"
 
-                # --- NEW: latch swipe as an event (so polling can't miss it) ---
-                if swipe != 0:
-                    # Don't allow a second swipe to overwrite an un-acked one
-                    if self._pending_swipe == 0:
-                        self._event_id += 1
-                        self._pending_swipe = int(swipe)
-                        self._pending_direction = self.current_direction
-                        self._pending_event_id = int(self._event_id)
-                        self._pending_set_time = time.time()
+                # ---------------------------------------------------------
+                # C) Re-arm logic: require some neutral frames after a swipe
+                # ---------------------------------------------------------
+                if swipe == 0:
+                    self._no_swipe_frames += 1
+                    if self._no_swipe_frames >= self._rearm_after_no_swipe_frames:
+                        self._armed = True
+                else:
+                    self._no_swipe_frames = 0
+
+                # ---------------------------------------------------------
+                # D) Hard emit interval + armed gate + pending gate
+                #    => prevents 1 motion from causing multiple swipe EVENTS
+                # ---------------------------------------------------------
+                can_emit = (
+                    swipe != 0
+                    and self._armed
+                    and (now2 - self._last_event_emit_time) >= self._min_event_interval_s
+                    and self._pending_swipe == 0
+                )
+
+                if can_emit:
+                    self._armed = False
+                    self._last_event_emit_time = now2
+
+                    self._event_id += 1
+                    self._pending_swipe = int(swipe)
+                    self._pending_direction = self.current_direction
+                    self._pending_event_id = int(self._event_id)
+                    self._pending_set_time = now2
+
         else:
             # No hand detected
             with self.lock:
@@ -312,11 +360,14 @@ class HandTracker:
                 self.current_swipe = 0
                 self.current_direction = "none"
 
+                # Re-arm when hand is gone (prevents "stuck disarmed" state)
+                self._armed = True
+                self._no_swipe_frames = 0
+
     def get_swipe_event(self):
         """Return a latched swipe event until consumed or TTL expires."""
         with self.lock:
             if self._pending_swipe != 0:
-                # TTL expiry safety (prevents a stuck swipe if client disappears)
                 if (time.time() - self._pending_set_time) > self._pending_ttl_s:
                     self._pending_swipe = 0
                     self._pending_direction = "none"
@@ -345,7 +396,7 @@ class HandTracker:
         while self.running:
             try:
                 self.process_frame()
-                # Speed change: tiny sleep only (keeps latency low, avoids 100% CPU spin)
+                # tiny sleep only (keeps latency low, avoids 100% CPU spin)
                 time.sleep(0.002)
             except Exception as e:
                 print(f"Error in camera loop: {e}")
@@ -388,8 +439,18 @@ async def startup_event():
     """Initialize tracker and start camera on startup"""
     global tracker
     try:
-        # You can tune infer_fps/target_width here without touching logic
-        tracker = HandTracker(cam_index=0, queue_len=10, infer_fps=15.0, target_width=640)
+        # Tune here without touching logic:
+        # - infer_fps controls mediapipe speed/latency
+        # - min_event_interval_s enforces "wait 1 sec between swipe events"
+        tracker = HandTracker(
+            cam_index=0,
+            queue_len=10,
+            infer_fps=15.0,
+            target_width=640,
+            min_event_interval_s=1.0,
+            rearm_no_swipe_frames=6,
+            pending_ttl_s=1.25,
+        )
         tracker.start()
         print("✓ Hand tracking initialized with camera")
     except Exception as e:
@@ -797,8 +858,6 @@ async def scrape_image(request: Dict[str, Any]):
 # Hand-tracking endpoints
 # -----------------------------------------------------------------------------
 
-from fastapi import Query
-
 @app.get("/api/finger-track")
 async def finger_track(
     consume: int = Query(0, ge=0, le=1),
@@ -824,6 +883,7 @@ async def finger_track(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting swipe: {str(e)}")
+
 
 @app.get("/api/view-adjust")
 async def view_adjust_get():
@@ -855,11 +915,6 @@ async def get_status():
             "swipe": {"value": swipe, "direction": direction},
         }
     )
-
-
-# -----------------------------------------------------------------------------
-# Entrypoint
-# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn
