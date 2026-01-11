@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Search, Plane, Hotel, Calendar, MapPin, Loader2, AlertCircle, Users, Star, ArrowLeft } from 'lucide-react';
 
@@ -74,7 +74,7 @@ const currencySymbols: Record<string, string> = {
     AUD: 'A$'
 };
 
-export default function ConfirmFlightsHotelsPage() {
+function ConfirmFlightsHotelsPageContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const tripId = searchParams.get('tripId');
@@ -827,5 +827,17 @@ export default function ConfirmFlightsHotelsPage() {
                 )}
             </div>
         </div>
+    );
+}
+
+export default function ConfirmFlightsHotelsPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-black">
+                <Loader2 className="w-8 h-8 animate-spin text-gray-600 dark:text-zinc-400" />
+            </div>
+        }>
+            <ConfirmFlightsHotelsPageContent />
+        </Suspense>
     );
 }
