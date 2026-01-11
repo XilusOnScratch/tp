@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, Suspense } from "react";
 import { ScheduleItem, Location } from "../types";
 
 type GoogleMapsLoaded = {
@@ -14,7 +14,7 @@ type GoogleMapsLoaded = {
   };
 };
 
-export default function MapPage() {
+function MapPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tripId = searchParams.get("tripId");
@@ -291,6 +291,20 @@ export default function MapPage() {
         <div ref={mapRef} className="w-full h-full" style={{ minHeight: 'calc(100vh - 120px)' }} />
       </div>
     </div>
+  );
+}
+
+export const dynamic = 'force-dynamic';
+
+export default function MapPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-black">
+        <div className="text-gray-900 dark:text-zinc-50">Loading...</div>
+      </div>
+    }>
+      <MapPageContent />
+    </Suspense>
   );
 }
 

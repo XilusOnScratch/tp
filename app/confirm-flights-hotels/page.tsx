@@ -830,6 +830,8 @@ function ConfirmFlightsHotelsPageContent() {
     );
 }
 
+export const dynamic = 'force-dynamic';
+
 export default function ConfirmFlightsHotelsPage() {
     return (
         <Suspense fallback={

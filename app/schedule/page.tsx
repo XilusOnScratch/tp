@@ -1,13 +1,13 @@
 "use client";
 
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
 import { ScheduleItem, TimeSelection } from "./types";
 import ScheduleGrid from "./components/ScheduleGrid";
 import AddItemModal from "./components/AddItemModal";
 import ConfirmScheduleModal from "./components/ConfirmScheduleModal";
 
-export default function SchedulePage() {
+function SchedulePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const daysParam = searchParams.get("days");
@@ -351,6 +351,20 @@ export default function SchedulePage() {
         />
       </div>
     </div>
+  );
+}
+
+export const dynamic = 'force-dynamic';
+
+export default function SchedulePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-black">
+        <div className="text-gray-900 dark:text-zinc-50">Loading...</div>
+      </div>
+    }>
+      <SchedulePageContent />
+    </Suspense>
   );
 }
 

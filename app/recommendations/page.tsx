@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SwipeInterface } from "@/components/SwipeInterface";
 import { motion } from "framer-motion";
 
-export default function RecommendationsPage() {
+function RecommendationsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tripId = searchParams.get("tripId");
@@ -152,5 +152,19 @@ export default function RecommendationsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export const dynamic = 'force-dynamic';
+
+export default function RecommendationsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-white">Loading...</div>
+      </div>
+    }>
+      <RecommendationsPageContent />
+    </Suspense>
   );
 }
