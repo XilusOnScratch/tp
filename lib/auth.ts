@@ -18,10 +18,10 @@ export const authOptions: NextAuthOptions = {
 
       if (!existingUser) {
         await User.create({
-          email: user.email,
-          name: user.name,
-          image: user.image,
-          googleId: account?.providerAccountId,
+          email: user.email || undefined,
+          name: user.name || undefined,
+          image: user.image || undefined,
+          googleId: account?.providerAccountId || undefined,
           emailVerified: new Date(),
         });
       } else if (account?.providerAccountId && !existingUser.googleId) {
