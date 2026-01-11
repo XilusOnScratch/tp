@@ -108,7 +108,7 @@ function shortestAngleDeltaDeg(fromDeg: number, toDeg: number) {
   return d;
 }
 
-export default function GoogleStreetViewPage() {
+function GoogleStreetViewPageContent() {
   const searchParams = useSearchParams();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const panoramaRef = useRef<GoogleStreetViewPanorama | null>(null);
